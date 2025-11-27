@@ -32,33 +32,59 @@ class SaleOrder(models.Model):
             return 0
 
     def _get_substitute_if_no_stock(self, product, location_id, required_qty):
-            """Obtiene el producto sustituto si no hay stock suficiente para la cantidad requerida"""
-            try:
-                # Verificar si el producto tiene un sustituto configurado
+        """Obtiene el primer producto sustituto con stock suficiente según prioridad"""
+        try:
+            # Obtener lista de sustitutos ordenados por secuencia
+            substitute_lines = product.product_tmpl_id.delivery_substitute_line_ids.sorted('sequence')
+            
+            # Fallback: si no hay sustitutos en líneas, buscar en el viejo campo
+            if not substitute_lines and product.product_tmpl_id.delivery_substitute_id:
                 substitute = product.product_tmpl_id.delivery_substitute_id
+                substitute_qty = self._get_product_available_qty(substitute, location_id)
                 
-                if not substitute:
-                    _logger.info(f"Producto {product.default_code or product.name} no tiene sustituto configurado")
-                    return product
+                if substitute_qty >= required_qty:
+                    _logger.info(f"Usando sustituto del campo legacy: {substitute.default_code}")
+                    return substitute
+            
+            if not substitute_lines:
+                _logger.info(f"Producto {product.default_code or product.name} no tiene sustitutos configurados")
+                return product
+            
+            # Verificar stock del producto original
+            available_qty = self._get_product_available_qty(product, location_id)
+            
+            if available_qty >= required_qty:
+                _logger.info(f"✓ Stock suficiente para {product.default_code or product.name}: {available_qty} unidades libres (requiere {required_qty})")
+                return product
+            
+            _logger.info(f"*** STOCK INSUFICIENTE para {product.default_code or product.name} ***")
+            _logger.info(f"    Stock libre disponible: {available_qty}")
+            _logger.info(f"    Cantidad requerida: {required_qty}")
+            _logger.info(f"    Faltante: {required_qty - available_qty}")
+            
+            # Iterar sobre sustitutos en orden de prioridad (sequence)
+            for idx, line in enumerate(substitute_lines, 1):
+                substitute = line.substitute_product_id
+                substitute_qty = self._get_product_available_qty(substitute, location_id)
                 
-                # Calcular stock disponible
-                available_qty = self._get_product_available_qty(product, location_id)
+                _logger.info(f"  → Probando sustituto #{idx} (seq: {line.sequence}): {substitute.default_code or substitute.name}")
+                _logger.info(f"    Stock disponible: {substitute_qty}")
                 
-                # CAMBIO PRINCIPAL: Verificar si hay stock suficiente para la cantidad requerida
-                if available_qty < required_qty:
-                    _logger.info(f"*** STOCK INSUFICIENTE para {product.default_code or product.name} ***")
-                    _logger.info(f"    Stock libre disponible: {available_qty}")
-                    _logger.info(f"    Cantidad requerida: {required_qty}")
-                    _logger.info(f"    Faltante: {required_qty - available_qty}")
-                    _logger.info(f"    Usando sustituto: {substitute.default_code or substitute.name}")
+                if substitute_qty >= required_qty:
+                    _logger.info(f"  ✓✓✓ SUSTITUTO SELECCIONADO: {substitute.default_code or substitute.name}")
+                    _logger.info(f"      Prioridad (sequence): {line.sequence}")
+                    _logger.info(f"      Stock disponible: {substitute_qty} (requiere {required_qty})")
                     return substitute
                 else:
-                    _logger.info(f"✓ Stock suficiente para {product.default_code or product.name}: {available_qty} unidades libres (requiere {required_qty})")
-                    return product
-                    
-            except Exception as e:
-                _logger.error(f"Error en _get_substitute_if_no_stock: {e}")
-                return product
+                    _logger.info(f"  ✗ Stock insuficiente ({substitute_qty} < {required_qty}), probando siguiente...")
+            
+            # Si ningún sustituto tiene stock, retornar el producto original
+            _logger.warning(f"⚠️ NINGÚN SUSTITUTO CON STOCK SUFICIENTE - Se usará producto original: {product.default_code}")
+            return product
+        
+        except Exception as e:
+            _logger.error(f"Error en _get_substitute_if_no_stock: {e}")
+            return product
 
     def _get_line_warehouse_location(self, line):
             """Obtiene la ubicación de stock del almacén específico de la línea de venta"""

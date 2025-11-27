@@ -5,9 +5,22 @@
         <field name="inherit_id" ref="product.product_template_form_view"/>
         <field name="arch" type="xml">
             <sheet>
-                <group position="inside">
-                    <field name="delivery_substitute_id" string="Producto Sustituto para Entregas"/>
-                </group>
+            <notebook>
+                <page name="substitutes_lines" string="Productos substitutos">
+
+                    <field name="delivery_substitute_line_ids" nolabel="1">
+                        <tree editable="bottom">
+                            <field name="sequence" widget="handle"/>
+                            <field name="substitute_product_id" 
+                                   options="{'no_create': True, 'no_open': True}"/>
+                            <field name="substitute_code"/>
+                            <field name="substitute_name"/>
+                            <field name="substitute_qty_available"/>
+                        </tree>
+                    </field>
+                    
+                </page>
+            </notebook>
             </sheet>
         </field>
     </record>

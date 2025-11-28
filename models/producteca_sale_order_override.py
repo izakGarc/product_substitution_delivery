@@ -26,7 +26,7 @@ try:
             for tag_part in self.tags.split(';'):
                 if tag_part.startswith('SUBSTITUTED:'):
                     products = tag_part.replace('SUBSTITUTED:', '').split(',')
-                    substituted_products.extend(products)
+                    substituted_products.extend([p.strip() for p in products if p.strip()])
             return substituted_products
         
         def _log_blocked_action(self, action_name, additional_info=""):

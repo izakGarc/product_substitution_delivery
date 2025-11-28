@@ -7,6 +7,9 @@
             <sheet>
             <notebook>
                 <page name="substitutes_lines" string="Productos substitutos">
+                 <group>
+                    <field name="allow_mix_substitutes"/>
+                </group>
 
                     <field name="delivery_substitute_line_ids" nolabel="1">
                         <tree editable="bottom">

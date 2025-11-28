@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 from odoo import models, fields
 
 class ProductTemplate(models.Model):
@@ -12,10 +13,10 @@ class ProductTemplate(models.Model):
              'Usa las flechitas para reordenar.'
     )
     
-    
-    # # Campo viejo para compatibilidad (opcional - puedes eliminarlo)
-    # delivery_substitute_id = fields.Many2one(
-    #     'product.product',
-    #     string='Producto Sustituto para Entregas (OBSOLETO)',
-    #     domain="[('type', '=', 'product')]"
-    # )
+    allow_mix_substitutes = fields.Boolean(
+        string='Permitir Mezclar Sustitutos',
+        default=False,
+        help='Si está marcado, cuando un sustituto no tenga stock suficiente, '
+             'el sistema buscará el siguiente sustituto para completar la cantidad faltante. '
+             'Si está desmarcado, solo usará el primer sustituto con stock >= cantidad requerida.'
+    )

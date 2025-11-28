@@ -196,19 +196,15 @@ class ProductecaOrderLineProtection(models.Model):
             producteca_order = self.env['producteca.sale_order'].browse(vals['order_id'])
             
             if producteca_order.tags and 'SUBSTITUTED:' in producteca_order.tags:
-                # Extraer productos sustituidos
-                substituted_products = []
-                for tag_part in producteca_order.tags.split(';'):
-                    if tag_part.startswith('SUBSTITUTED:'):
-                        products = tag_part.replace('SUBSTITUTED:', '').split(',')
-                        substituted_products.extend(products)
+                # Parsear tags para obtener TODOS los SKUs bloqueados
+                blocked_skus = self._parse_blocked_skus(producteca_order.tags)
                 
-                # Verificar si el SKU de esta línea está sustituido
+                # Verificar si el SKU de esta línea está bloqueado
                 line_sku = vals.get('variation_sku', '')
                 
-                if line_sku and line_sku in substituted_products:
+                if line_sku and line_sku in blocked_skus:
                     _logger.info(f"🛡️🛡️ CREACIÓN DE LÍNEA PRODUCTECA BLOQUEADA - SKU: {line_sku} 🛡️🛡️")
-                    _logger.info(f"🛡️🛡️ Productos sustituidos: {substituted_products} 🛡️🛡️")
+                    _logger.info(f"🛡️🛡️ SKUs bloqueados: {blocked_skus} 🛡️🛡️")
                     
                     # Agregar mensaje al chatter de la orden de Odoo si existe
                     if producteca_order.sale_order:
@@ -224,3 +220,48 @@ class ProductecaOrderLineProtection(models.Model):
                     return self.env['producteca.sale_order_line']
         
         return super().create(vals)
+    
+    def _parse_blocked_skus(self, tags):
+        """
+        Parsear tags para extraer TODOS los SKUs que deben ser bloqueados:
+        - Productos originales sustituidos (de SUBSTITUTED:)
+        - Productos usados en sustitución (de MIXED:)
+        
+        Formato esperado: "SUBSTITUTED:SKU-A,SKU-B;MIXED:SKU-A[Sub1(2),Sub2(1)];SKU-B[Sub3(4)]"
+        """
+        blocked = set()
+        
+        if not tags:
+            return blocked
+        
+        for tag_part in tags.split(';'):
+            tag_part = tag_part.strip()
+            
+            # Extraer productos sustituidos originales
+            if tag_part.startswith('SUBSTITUTED:'):
+                products = tag_part.replace('SUBSTITUTED:', '').split(',')
+                blocked.update([p.strip() for p in products if p.strip()])
+            
+            # Extraer productos usados en mezcla
+            elif tag_part.startswith('MIXED:'):
+                # Formato: MIXED:SKU-A[Sub1(2),Sub2(1)];SKU-B[Sub3(4)]
+                mixed_content = tag_part.replace('MIXED:', '')
+                
+                # NO bloquear el SKU original (SKU-A), solo los sustitutos
+                # Extraer solo lo que está dentro de corchetes
+                import re
+                # Buscar patrones: [Sub1(2),Sub2(1)]
+                matches = re.findall(r'\[(.*?)\]', mixed_content)
+                
+                for match in matches:
+                    # match = "Sub1(2),Sub2(1)"
+                    substitutes = match.split(',')
+                    for sub in substitutes:
+                        # sub = "Sub1(2)"
+                        sku = sub.split('(')[0].strip()
+                        if sku:
+                            # NO agregar a blocked - los sustitutos SÍ pueden recibir actualizaciones
+                            pass
+        
+        _logger.info(f"🔍 SKUs bloqueados parseados: {blocked}")
+        return blocked

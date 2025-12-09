@@ -100,8 +100,7 @@ class SaleOrder(models.Model):
     def _get_substitutes_for_quantity(self, product, location_id, required_qty):
         """
         Obtiene lista de sustitutos necesarios para completar la cantidad requerida con mezcla.
-        Retorna lista de tuplas: [(producto, cantidad), ...]
-        Usado cuando allow_mix_substitutes = True
+        PRIMERO usa el stock disponible del producto original.
         """
         try:
             product_template = product.product_tmpl_id
@@ -122,11 +121,20 @@ class SaleOrder(models.Model):
             _logger.info(f"    Stock libre disponible: {available_qty}")
             _logger.info(f"    Cantidad requerida: {required_qty}")
             _logger.info(f"    Faltante: {required_qty - available_qty}")
-            _logger.info(f"🔓 Mezcla PERMITIDA - Intentando completar {required_qty} unidades con múltiples sustitutos")
+            _logger.info(f"🔓 Mezcla PERMITIDA - Intentando completar {required_qty} unidades con múltiples productos")
             
             result = []
             remaining_qty = required_qty
             
+            # NUEVO: Primero usar el stock del producto original si tiene algo
+            if available_qty > 0:
+                result.append((product, available_qty))
+                remaining_qty -= available_qty
+                _logger.info(f"  ✓ Usando stock del producto ORIGINAL: {product.default_code} x {available_qty}")
+                _logger.info(f"  📊 Progreso: {available_qty}/{required_qty} completadas")
+                _logger.info(f"  📊 Faltan: {remaining_qty}")
+            
+            # Ahora continuar con los sustitutos
             for idx, line in enumerate(substitute_lines, 1):
                 if remaining_qty <= 0:
                     break
@@ -162,14 +170,14 @@ class SaleOrder(models.Model):
                     _logger.info(f"  ✓ Agregado: {substitute.default_code} x {qty_to_use}")
                     _logger.info(f"  📊 Progreso: {required_qty - remaining_qty}/{required_qty} completadas")
             
-            # Si aún falta cantidad, agregar línea con producto original (sin stock)
+            # Si aún falta cantidad después de usar todo, agregar línea sin stock
             if remaining_qty > 0:
-                _logger.warning(f"⚠️ Faltan {remaining_qty} unidades - Agregando línea con producto original (sin stock)")
+                _logger.warning(f"⚠️ Faltan {remaining_qty} unidades - Agregando línea sin stock del producto original")
                 result.append((product, remaining_qty))
             
-            # Si no se encontró NINGÚN sustituto con stock, usar el producto original
+            # Si no se pudo agregar nada (todos sin stock), usar producto original
             if not result:
-                _logger.warning(f"⚠️ NINGÚN sustituto tiene stock - Usando producto original con cantidad solicitada")
+                _logger.warning(f"⚠️ NINGÚN producto tiene stock - Usando producto original con cantidad solicitada")
                 result = [(product, required_qty)]
             
             _logger.info(f"✅ Resultado final: {len(result)} líneas para completar {required_qty} unidades")

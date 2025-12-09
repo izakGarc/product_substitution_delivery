@@ -43,3 +43,24 @@ class ProductSubstituteLine(models.Model):
         string='Cantidad Disponible',
         readonly=True
     )
+    
+    substitute_qty_reserved = fields.Float(
+        string='Cantidad Reservada',
+        compute='_compute_substitute_qty_reserved',
+        store=False
+    )
+    
+    @api.depends('substitute_product_id')
+    def _compute_substitute_qty_reserved(self):
+        for rec in self:
+            if not rec.substitute_product_id:
+                rec.substitute_qty_reserved = 0
+                continue
+
+            # Obtener los quants de ese producto
+            quants = self.env['stock.quant'].search([
+                ('product_id', '=', rec.substitute_product_id.id),
+            ])
+
+            # Sumar la cantidad reservada
+            rec.substitute_qty_reserved = sum(quants.mapped('reserved_quantity'))

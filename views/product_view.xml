@@ -19,6 +19,7 @@
                             <field name="substitute_code"/>
                             <field name="substitute_name"/>
                             <field name="substitute_qty_available"/>
+                            <field name="substitute_qty_reserved"/>
                         </tree>
                     </field>
                     

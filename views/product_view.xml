@@ -15,11 +15,14 @@
                         <tree editable="bottom">
                             <field name="sequence" widget="handle"/>
                             <field name="substitute_product_id" 
-                                   options="{'no_create': True, 'no_open': True}"/>
+                                    options="{'no_create': True, 'no_open': True}"/>
                             <field name="substitute_code"/>
                             <field name="substitute_name"/>
-                            <field name="substitute_qty_available"/>
-                            <field name="substitute_qty_reserved"/>
+                            <field name="substitute_qty_available" string="A la Mano"/>
+                            <field name="substitute_qty_reserved" string="Reservados"/>
+                            <field name="substitute_qty_free" string="Disponible Libre" 
+                                    decoration-success="substitute_qty_free &gt; 0"
+                                    decoration-danger="substitute_qty_free &lt;= 0"/>
                         </tree>
                     </field>
                     

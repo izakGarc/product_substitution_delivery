@@ -40,16 +40,23 @@ class ProductSubstituteLine(models.Model):
     
     substitute_qty_available = fields.Float(
         related='substitute_product_id.qty_available',
-        string='Cantidad Disponible',
+        string='A la Mano', 
         readonly=True
     )
-    
+
     substitute_qty_reserved = fields.Float(
-        string='Cantidad Reservada',
+        string='Reservados', 
         compute='_compute_substitute_qty_reserved',
         store=False
     )
-    
+
+    substitute_qty_free = fields.Float(
+        string='Disponible Libre',
+        compute='_compute_substitute_qty_free',
+        help='Cantidad realmente disponible para usar (A la mano - Reservados)',
+        store=False
+    )
+
     @api.depends('substitute_product_id')
     def _compute_substitute_qty_reserved(self):
         for rec in self:
@@ -64,3 +71,15 @@ class ProductSubstituteLine(models.Model):
 
             # Sumar la cantidad reservada
             rec.substitute_qty_reserved = sum(quants.mapped('reserved_quantity'))
+
+    @api.depends('substitute_product_id', 'substitute_product_id.qty_available', 'substitute_product_id.outgoing_qty')  # ← NUEVO
+    def _compute_substitute_qty_free(self):
+        for rec in self:
+            if not rec.substitute_product_id:
+                rec.substitute_qty_free = 0
+                continue
+            
+            # Stock libre = A la mano - Salientes
+            qty_on_hand = rec.substitute_product_id.qty_available
+            outgoing = rec.substitute_product_id.outgoing_qty
+            rec.substitute_qty_free = qty_on_hand - outgoing

@@ -26,6 +26,13 @@ class ProductSubstituteLine(models.Model):
         domain="[('type', '=', 'product')]"
     )
     
+    channel_id = fields.Many2one(
+        'partner.channel',
+        string='Canal',
+        required=True,
+        help='Canal para el cual este sustituto está disponible'
+    )
+    
     substitute_code = fields.Char(
         related='substitute_product_id.default_code',
         string='Referencia Interna',
@@ -40,23 +47,23 @@ class ProductSubstituteLine(models.Model):
     
     substitute_qty_available = fields.Float(
         related='substitute_product_id.qty_available',
-        string='A la Mano', 
+        string='A la Mano',
         readonly=True
     )
-
+    
     substitute_qty_reserved = fields.Float(
-        string='Reservados', 
+        string='Reservados',
         compute='_compute_substitute_qty_reserved',
         store=False
     )
-
+    
     substitute_qty_free = fields.Float(
         string='Disponible Libre',
         compute='_compute_substitute_qty_free',
         help='Cantidad realmente disponible para usar (A la mano - Reservados)',
         store=False
     )
-
+    
     @api.depends('substitute_product_id')
     def _compute_substitute_qty_reserved(self):
         for rec in self:
@@ -71,8 +78,8 @@ class ProductSubstituteLine(models.Model):
 
             # Sumar la cantidad reservada
             rec.substitute_qty_reserved = sum(quants.mapped('reserved_quantity'))
-
-    @api.depends('substitute_product_id', 'substitute_product_id.qty_available', 'substitute_product_id.outgoing_qty')  # ← NUEVO
+    
+    @api.depends('substitute_product_id', 'substitute_product_id.qty_available', 'substitute_product_id.outgoing_qty')
     def _compute_substitute_qty_free(self):
         for rec in self:
             if not rec.substitute_product_id:

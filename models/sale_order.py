@@ -7,6 +7,16 @@ _logger = logging.getLogger(__name__)
 
 class SaleOrder(models.Model):
     _inherit = 'sale.order'
+    
+    def _get_order_channel(self):
+        """Obtiene el primer canal de la orden de venta"""
+        if self.channel_ids:
+            first_channel = self.channel_ids[0]
+            _logger.info(f"📢 Canal de la orden: {first_channel.name} (ID: {first_channel.id})")
+            return first_channel
+        else:
+            _logger.warning(f"⚠️ Orden {self.name} no tiene canal asignado")
+            return None
 
     def _get_product_available_qty(self, product, location_id):
         """Obtiene la cantidad disponible real del producto calculando: Cantidad a la mano - Saliente"""
@@ -31,18 +41,34 @@ class SaleOrder(models.Model):
             _logger.error(f"Error calculando stock para {product.name}: {e}")
             return 0
 
-    def _get_substitute_if_no_stock(self, product, location_id, required_qty):
+    def _get_substitute_if_no_stock(self, product, location_id, required_qty, order_channel=None):
         """
         Obtiene el primer producto sustituto con stock suficiente según prioridad.
-        Si ninguno tiene suficiente, retorna el PRIMERO CON ALGO de stock.
-        Usado cuando allow_mix_substitutes = False
+        Filtra por canal de la orden.
         """
         try:
-            # Obtener lista de sustitutos ordenados por secuencia
+            # Obtener lista de sustitutos ordenados por secuencia y filtrados por canal
             substitute_lines = product.product_tmpl_id.delivery_substitute_line_ids.sorted('sequence')
             
+            # Filtrar por canal
+            if order_channel:
+                # Si hay canal en la orden, buscar sustitutos con ese canal O sin canal (genéricos)
+                substitute_lines = substitute_lines.filtered(
+                    lambda l: l.channel_id.id == order_channel.id or not l.channel_id
+                )
+                _logger.info(f"🔍 Filtrando sustitutos por canal: {order_channel.name} (incluye genéricos sin canal)")
+                _logger.info(f"📋 Sustitutos encontrados: {len(substitute_lines)}")
+            else:
+                # Si NO hay canal en la orden, solo usar sustitutos genéricos (sin canal)
+                substitute_lines = substitute_lines.filtered(lambda l: not l.channel_id)
+                _logger.warning(f"⚠️ Orden sin canal asignado - Solo se usarán sustitutos genéricos (sin canal)")
+                _logger.info(f"📋 Sustitutos genéricos encontrados: {len(substitute_lines)}")
+
             if not substitute_lines:
-                _logger.info(f"Producto {product.default_code or product.name} no tiene sustitutos configurados")
+                if order_channel:
+                    _logger.info(f"Producto {product.default_code or product.name} no tiene sustitutos para canal {order_channel.name}")
+                else:
+                    _logger.info(f"Producto {product.default_code or product.name} no tiene sustitutos genéricos (sin canal)")
                 return product
             
             # Verificar stock del producto original
@@ -65,7 +91,7 @@ class SaleOrder(models.Model):
                 substitute = line.substitute_product_id
                 substitute_qty = self._get_product_available_qty(substitute, location_id)
                 
-                _logger.info(f"  → Probando sustituto #{idx} (seq: {line.sequence}): {substitute.default_code or substitute.name}")
+                _logger.info(f"  → Probando sustituto #{idx} (seq: {line.sequence}, canal: {line.channel_id.name}): {substitute.default_code or substitute.name}")
                 _logger.info(f"    Stock disponible: {substitute_qty}")
                 
                 # Guardar el primero que tenga ALGO de stock (aunque no sea suficiente)
@@ -76,6 +102,7 @@ class SaleOrder(models.Model):
                 if substitute_qty >= required_qty:
                     _logger.info(f"  ✓✓✓ SUSTITUTO SELECCIONADO: {substitute.default_code or substitute.name}")
                     _logger.info(f"      Prioridad (sequence): {line.sequence}")
+                    _logger.info(f"      Canal: {line.channel_id.name}")
                     _logger.info(f"      Stock disponible: {substitute_qty} (requiere {required_qty})")
                     return substitute
                 else:
@@ -97,17 +124,36 @@ class SaleOrder(models.Model):
             _logger.error(f"Error en _get_substitute_if_no_stock: {e}")
             return product
 
-    def _get_substitutes_for_quantity(self, product, location_id, required_qty):
+    def _get_substitutes_for_quantity(self, product, location_id, required_qty, order_channel=None):
         """
         Obtiene lista de sustitutos necesarios para completar la cantidad requerida con mezcla.
         PRIMERO usa el stock disponible del producto original.
+        Filtra por canal de la orden.
+        Retorna lista de tuplas: [(producto, cantidad), ...]
         """
         try:
             product_template = product.product_tmpl_id
             substitute_lines = product_template.delivery_substitute_line_ids.sorted('sequence')
             
+            # Filtrar por canal
+            if order_channel:
+                # Si hay canal en la orden, buscar sustitutos con ese canal O sin canal (genéricos)
+                substitute_lines = substitute_lines.filtered(
+                    lambda l: l.channel_id.id == order_channel.id or not l.channel_id
+                )
+                _logger.info(f"🔍 Filtrando sustitutos por canal: {order_channel.name} (incluye genéricos sin canal)")
+                _logger.info(f"📋 Sustitutos encontrados: {len(substitute_lines)}")
+            else:
+                # Si NO hay canal en la orden, solo usar sustitutos genéricos (sin canal)
+                substitute_lines = substitute_lines.filtered(lambda l: not l.channel_id)
+                _logger.warning(f"⚠️ Orden sin canal asignado - Solo se usarán sustitutos genéricos (sin canal)")
+                _logger.info(f"📋 Sustitutos genéricos encontrados: {len(substitute_lines)}")
+
             if not substitute_lines:
-                _logger.info(f"Producto {product.default_code or product.name} no tiene sustitutos configurados")
+                if order_channel:
+                    _logger.info(f"Producto {product.default_code or product.name} no tiene sustitutos para canal {order_channel.name}")
+                else:
+                    _logger.info(f"Producto {product.default_code or product.name} no tiene sustitutos genéricos (sin canal)")
                 return [(product, required_qty)]
             
             # Verificar stock del producto original
@@ -126,7 +172,7 @@ class SaleOrder(models.Model):
             result = []
             remaining_qty = required_qty
             
-            # NUEVO: Primero usar el stock del producto original si tiene algo
+            # PRIMERO usar el stock del producto original si tiene algo
             if available_qty > 0:
                 result.append((product, available_qty))
                 remaining_qty -= available_qty
@@ -142,7 +188,7 @@ class SaleOrder(models.Model):
                 substitute = line.substitute_product_id
                 substitute_qty = self._get_product_available_qty(substitute, location_id)
                 
-                _logger.info(f"  → Evaluando sustituto #{idx} (seq: {line.sequence}): {substitute.default_code or substitute.name}")
+                _logger.info(f"  → Evaluando sustituto #{idx} (seq: {line.sequence}, canal: {line.channel_id.name}): {substitute.default_code or substitute.name}")
                 _logger.info(f"    Stock disponible: {substitute_qty}")
                 _logger.info(f"    Faltan por completar: {remaining_qty}")
                 
@@ -239,6 +285,9 @@ class SaleOrder(models.Model):
             mixed_substitutions = {}  # {SKU_original: [(SKU_sustituto, cantidad), ...]}
             lines_to_remove = []
             new_lines_to_create = []
+            
+            # Obtener el canal de la orden (primer canal si hay múltiples)
+            order_channel = order._get_order_channel()
 
             for line in order.order_line:
                 if not line.product_id:
@@ -263,7 +312,7 @@ class SaleOrder(models.Model):
                 if allow_mix:
                     # MODO MEZCLA: Obtener lista de sustitutos (puede ser múltiple)
                     _logger.info(f"🔓 Producto permite MEZCLA de sustitutos")
-                    substitutes_list = self._get_substitutes_for_quantity(original_product, location, original_qty)
+                    substitutes_list = self._get_substitutes_for_quantity(original_product, location, original_qty, order_channel)
                     
                     # Si solo hay 1 elemento y es el producto original, no hay sustitución
                     if len(substitutes_list) == 1 and substitutes_list[0][0].id == original_product.id:
@@ -271,7 +320,7 @@ class SaleOrder(models.Model):
                 else:
                     # MODO SIMPLE: Obtener UN sustituto
                     _logger.info(f"🔒 Producto NO permite mezcla - Modo sustitución simple")
-                    substitute_product = self._get_substitute_if_no_stock(original_product, location, original_qty)
+                    substitute_product = self._get_substitute_if_no_stock(original_product, location, original_qty, order_channel)
                     
                     # Si no hubo sustitución, continuar
                     if substitute_product.id == original_product.id:

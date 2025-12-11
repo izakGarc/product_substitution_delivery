@@ -44,10 +44,11 @@ class SaleOrder(models.Model):
     def _get_substitute_if_no_stock(self, product, location_id, required_qty, order_channel=None):
         """
         Obtiene el primer producto sustituto con stock suficiente según prioridad.
+        Si hay sustitutos configurados, IGNORA el stock del producto original.
         Filtra por canal de la orden.
         """
         try:
-            # Obtener lista de sustitutos ordenados por secuencia y filtrados por canal
+            # Obtener lista de sustitutos ordenados por secuencia
             substitute_lines = product.product_tmpl_id.delivery_substitute_line_ids.sorted('sequence')
             
             # Filtrar por canal
@@ -63,25 +64,27 @@ class SaleOrder(models.Model):
                 substitute_lines = substitute_lines.filtered(lambda l: not l.channel_id)
                 _logger.warning(f"⚠️ Orden sin canal asignado - Solo se usarán sustitutos genéricos (sin canal)")
                 _logger.info(f"📋 Sustitutos genéricos encontrados: {len(substitute_lines)}")
-
+            
             if not substitute_lines:
                 if order_channel:
                     _logger.info(f"Producto {product.default_code or product.name} no tiene sustitutos para canal {order_channel.name}")
                 else:
                     _logger.info(f"Producto {product.default_code or product.name} no tiene sustitutos genéricos (sin canal)")
+                
+                # Sin sustitutos configurados, verificar stock del producto original
+                available_qty = self._get_product_available_qty(product, location_id)
+                
+                if available_qty >= required_qty:
+                    _logger.info(f"✓ Stock suficiente para {product.default_code or product.name}: {available_qty} unidades libres (requiere {required_qty})")
+                else:
+                    _logger.warning(f"⚠️ Stock insuficiente para {product.default_code or product.name}: {available_qty} disponibles (requiere {required_qty})")
+                
                 return product
             
-            # Verificar stock del producto original
-            available_qty = self._get_product_available_qty(product, location_id)
-            
-            if available_qty >= required_qty:
-                _logger.info(f"✓ Stock suficiente para {product.default_code or product.name}: {available_qty} unidades libres (requiere {required_qty})")
-                return product
-            
-            _logger.info(f"*** STOCK INSUFICIENTE para {product.default_code or product.name} ***")
-            _logger.info(f"    Stock libre disponible: {available_qty}")
+            # SI HAY SUSTITUTOS CONFIGURADOS: Ignorar stock del producto original
+            _logger.info(f"🔄 Producto tiene sustitutos configurados - IGNORANDO stock del producto original")
+            _logger.info(f"*** BUSCANDO SUSTITUTO para {product.default_code or product.name} ***")
             _logger.info(f"    Cantidad requerida: {required_qty}")
-            _logger.info(f"    Faltante: {required_qty - available_qty}")
             
             # Variable para guardar el primer sustituto CON ALGO de stock
             first_with_stock = None
@@ -91,7 +94,8 @@ class SaleOrder(models.Model):
                 substitute = line.substitute_product_id
                 substitute_qty = self._get_product_available_qty(substitute, location_id)
                 
-                _logger.info(f"  → Probando sustituto #{idx} (seq: {line.sequence}, canal: {line.channel_id.name}): {substitute.default_code or substitute.name}")
+                canal_info = f"canal: {line.channel_id.name}" if line.channel_id else "genérico (sin canal)"
+                _logger.info(f"  → Probando sustituto #{idx} (seq: {line.sequence}, {canal_info}): {substitute.default_code or substitute.name}")
                 _logger.info(f"    Stock disponible: {substitute_qty}")
                 
                 # Guardar el primero que tenga ALGO de stock (aunque no sea suficiente)
@@ -102,7 +106,7 @@ class SaleOrder(models.Model):
                 if substitute_qty >= required_qty:
                     _logger.info(f"  ✓✓✓ SUSTITUTO SELECCIONADO: {substitute.default_code or substitute.name}")
                     _logger.info(f"      Prioridad (sequence): {line.sequence}")
-                    _logger.info(f"      Canal: {line.channel_id.name}")
+                    _logger.info(f"      Canal: {line.channel_id.name if line.channel_id else 'genérico'}")
                     _logger.info(f"      Stock disponible: {substitute_qty} (requiere {required_qty})")
                     return substitute
                 else:
@@ -127,7 +131,7 @@ class SaleOrder(models.Model):
     def _get_substitutes_for_quantity(self, product, location_id, required_qty, order_channel=None):
         """
         Obtiene lista de sustitutos necesarios para completar la cantidad requerida con mezcla.
-        PRIMERO usa el stock disponible del producto original.
+        Si hay sustitutos configurados, IGNORA el stock del producto original.
         Filtra por canal de la orden.
         Retorna lista de tuplas: [(producto, cantidad), ...]
         """
@@ -148,39 +152,33 @@ class SaleOrder(models.Model):
                 substitute_lines = substitute_lines.filtered(lambda l: not l.channel_id)
                 _logger.warning(f"⚠️ Orden sin canal asignado - Solo se usarán sustitutos genéricos (sin canal)")
                 _logger.info(f"📋 Sustitutos genéricos encontrados: {len(substitute_lines)}")
-
+            
             if not substitute_lines:
                 if order_channel:
                     _logger.info(f"Producto {product.default_code or product.name} no tiene sustitutos para canal {order_channel.name}")
                 else:
                     _logger.info(f"Producto {product.default_code or product.name} no tiene sustitutos genéricos (sin canal)")
-                return [(product, required_qty)]
+                
+                # Sin sustitutos configurados, verificar stock del producto original
+                available_qty = self._get_product_available_qty(product, location_id)
+                
+                if available_qty >= required_qty:
+                    _logger.info(f"✓ Stock suficiente para {product.default_code or product.name}: {available_qty} unidades libres (requiere {required_qty})")
+                    return [(product, required_qty)]
+                else:
+                    _logger.warning(f"⚠️ Stock insuficiente para {product.default_code or product.name}: {available_qty} disponibles (requiere {required_qty})")
+                    return [(product, required_qty)]
             
-            # Verificar stock del producto original
-            available_qty = self._get_product_available_qty(product, location_id)
-            
-            if available_qty >= required_qty:
-                _logger.info(f"✓ Stock suficiente para {product.default_code or product.name}: {available_qty} unidades libres (requiere {required_qty})")
-                return [(product, required_qty)]
-            
-            _logger.info(f"*** STOCK INSUFICIENTE para {product.default_code or product.name} ***")
-            _logger.info(f"    Stock libre disponible: {available_qty}")
+            # SI HAY SUSTITUTOS CONFIGURADOS: Ignorar stock del producto original
+            _logger.info(f"🔄 Producto tiene sustitutos configurados - IGNORANDO stock del producto original")
+            _logger.info(f"*** BUSCANDO SUSTITUTOS MIXTOS para {product.default_code or product.name} ***")
             _logger.info(f"    Cantidad requerida: {required_qty}")
-            _logger.info(f"    Faltante: {required_qty - available_qty}")
-            _logger.info(f"🔓 Mezcla PERMITIDA - Intentando completar {required_qty} unidades con múltiples productos")
+            _logger.info(f"🔓 Mezcla PERMITIDA - Intentando completar {required_qty} unidades con múltiples sustitutos")
             
             result = []
             remaining_qty = required_qty
             
-            # PRIMERO usar el stock del producto original si tiene algo
-            if available_qty > 0:
-                result.append((product, available_qty))
-                remaining_qty -= available_qty
-                _logger.info(f"  ✓ Usando stock del producto ORIGINAL: {product.default_code} x {available_qty}")
-                _logger.info(f"  📊 Progreso: {available_qty}/{required_qty} completadas")
-                _logger.info(f"  📊 Faltan: {remaining_qty}")
-            
-            # Ahora continuar con los sustitutos
+            # Iterar sobre sustitutos en orden de prioridad
             for idx, line in enumerate(substitute_lines, 1):
                 if remaining_qty <= 0:
                     break
@@ -188,7 +186,8 @@ class SaleOrder(models.Model):
                 substitute = line.substitute_product_id
                 substitute_qty = self._get_product_available_qty(substitute, location_id)
                 
-                _logger.info(f"  → Evaluando sustituto #{idx} (seq: {line.sequence}, canal: {line.channel_id.name}): {substitute.default_code or substitute.name}")
+                canal_info = f"canal: {line.channel_id.name}" if line.channel_id else "genérico (sin canal)"
+                _logger.info(f"  → Evaluando sustituto #{idx} (seq: {line.sequence}, {canal_info}): {substitute.default_code or substitute.name}")
                 _logger.info(f"    Stock disponible: {substitute_qty}")
                 _logger.info(f"    Faltan por completar: {remaining_qty}")
                 
@@ -216,14 +215,15 @@ class SaleOrder(models.Model):
                     _logger.info(f"  ✓ Agregado: {substitute.default_code} x {qty_to_use}")
                     _logger.info(f"  📊 Progreso: {required_qty - remaining_qty}/{required_qty} completadas")
             
-            # Si aún falta cantidad después de usar todo, agregar línea sin stock
+            # Si aún falta cantidad después de usar todos los sustitutos
             if remaining_qty > 0:
-                _logger.warning(f"⚠️ Faltan {remaining_qty} unidades - Agregando línea sin stock del producto original")
+                _logger.warning(f"⚠️ Faltan {remaining_qty} unidades después de usar todos los sustitutos")
+                _logger.warning(f"⚠️ Agregando línea sin stock del producto original para completar")
                 result.append((product, remaining_qty))
             
             # Si no se pudo agregar nada (todos sin stock), usar producto original
             if not result:
-                _logger.warning(f"⚠️ NINGÚN producto tiene stock - Usando producto original con cantidad solicitada")
+                _logger.warning(f"⚠️ NINGÚN sustituto tiene stock - Usando producto original con cantidad solicitada")
                 result = [(product, required_qty)]
             
             _logger.info(f"✅ Resultado final: {len(result)} líneas para completar {required_qty} unidades")

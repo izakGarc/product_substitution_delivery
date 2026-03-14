@@ -17,6 +17,7 @@
                             <field name="substitute_product_id" 
                                     options="{'no_create': True, 'no_open': True}"/>
                             <field name="channel_id" options="{'no_create': True}"/>
+                            <field name="location_id" options="{'no_create': True, 'no_open': True}" required="1"/>
                             <field name="substitute_code"/>
                             <field name="substitute_name"/>
                             <field name="substitute_qty_available" string="A la Mano"/>

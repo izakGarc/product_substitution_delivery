@@ -24,6 +24,7 @@ Al validar una entrega (stock.picking), si un producto no tiene stock disponible
     'auto_install': False,
     'data': [
         'security/ir.model.access.csv',
+        'security/groups.xml',
         'views/product_view.xml'
     ],
     'license': 'LGPL-3', # Buena práctica añadir una licencia

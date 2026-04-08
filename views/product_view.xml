@@ -6,7 +6,7 @@
         <field name="arch" type="xml">
             <sheet>
             <notebook>
-                <page name="substitutes_lines" string="Productos substitutos">
+                <page name="substitutes_lines" string="Productos substitutos" groups="product_substitution_delivery.product_substitution_delivery_group">
                  <group>
                     <field name="allow_mix_substitutes"/>
                 </group>

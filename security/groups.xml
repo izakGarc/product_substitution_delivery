@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<odoo>
+  <data>
+
+    <record id="product_substitution_delivery_group" model="res.groups">
+      <field name="name">Configuración de substitutos  </field>
+      <field name="comment"></field>
+    </record>
+
+  </data>
+</odoo>

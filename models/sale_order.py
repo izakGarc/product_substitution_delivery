@@ -2,6 +2,7 @@
 from odoo import models, fields, api
 from odoo.exceptions import UserError
 import logging
+import math
 
 _logger = logging.getLogger(__name__)
 
@@ -98,6 +99,48 @@ class SaleOrder(models.Model):
             _logger.error(f"Error calculando stock para {product.default_code}: {e}")
             return 0
 
+    def _get_kit_available_qty_by_location(self, product, location):
+        """
+        Calcula la disponibilidad de un producto en una ubicación,
+        manejando correctamente productos tipo KIT (BOM phantom).
+        - Sin BOM phantom: delega a _get_product_available_qty_by_location.
+        - Con BOM phantom: retorna floor(min(stock_componente / qty_bom)) por componente.
+        """
+        bom = self.env['mrp.bom'].search([
+            ('product_tmpl_id', '=', product.product_tmpl_id.id),
+            ('type', '=', 'phantom'),
+        ], limit=1)
+
+        if not bom:
+            return self._get_product_available_qty_by_location(product, location)
+
+        _logger.info(
+            f"  [kit] {product.default_code or product.name} "
+            f"es KIT → verificando {len(bom.bom_line_ids)} componentes de BOM"
+        )
+
+        min_qty = float('inf')
+        for bom_line in bom.bom_line_ids:
+            component = bom_line.product_id
+            component_stock = self._get_product_available_qty_by_location(component, location)
+            if bom_line.product_qty > 0:
+                component_available = math.floor(component_stock / bom_line.product_qty)
+            else:
+                component_available = 0
+            _logger.info(
+                f"    [componente] {component.default_code or component.name}: "
+                f"stock={component_stock} / qty_bom={bom_line.product_qty} "
+                f"→ {component_available} kits posibles"
+            )
+            min_qty = min(min_qty, component_available)
+
+        result = int(min_qty) if min_qty != float('inf') else 0
+        _logger.info(
+            f"  [kit] {product.default_code or product.name} "
+            f"→ disponibilidad KIT en {location.name}: {result}"
+        )
+        return result
+
     def _find_substitute(self, product, required_qty, order_channel):
         """
         Busca el primer sustituto con stock suficiente para el canal dado.
@@ -137,7 +180,7 @@ class SaleOrder(models.Model):
                 )
                 continue
 
-            substitute_qty = self._get_product_available_qty_by_location(substitute, sub_location)
+            substitute_qty = self._get_kit_available_qty_by_location(substitute, sub_location)
             canal_info = line.channel_id.name if line.channel_id else 'genérico'
 
             _logger.info(

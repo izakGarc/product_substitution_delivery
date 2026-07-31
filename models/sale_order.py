@@ -217,6 +217,58 @@ class SaleOrder(models.Model):
             _logger.error(f"Error obteniendo ubicación de almacén: {e}")
             return None
 
+    def _get_producteca_price_for_line(self, line):
+        """
+        Recupera el precio original de Producteca para una línea,
+        aplicando la misma conversión IVA que usa el conector al importar.
+        Fallback a line.price_unit si no hay binding Producteca.
+        """
+        order_name = line.order_id.name or '?'
+        sku = (line.product_id.default_code or line.product_id.name or '?')
+        try:
+            pline = line.producteca_bindings  # Many2one → producteca.sale_order_line
+            if not pline:
+                _logger.warning(
+                    f"[{order_name}] SKU {sku}: sin binding Producteca "
+                    f"→ fallback a price_unit={line.price_unit}"
+                )
+                return line.price_unit
+
+            if not pline.price:
+                _logger.warning(
+                    f"[{order_name}] SKU {sku}: binding Producteca encontrado "
+                    f"(pline.id={pline.id}) pero pline.price vino vacío o 0 "
+                    f"→ fallback a price_unit={line.price_unit}"
+                )
+                return line.price_unit
+
+            pso = pline.order_id                      # producteca.sale_order
+            account = pso and pso.connection_account  # producteca.account
+
+            if not account:
+                pso_name = pso.name if pso else '(sin orden Producteca)'
+                _logger.warning(
+                    f"[{order_name}] SKU {sku}: orden Producteca '{pso_name}' "
+                    f"no tiene connection_account configurada "
+                    f"→ fallback a price_unit={line.price_unit}"
+                )
+                return line.price_unit
+
+            converted = account.ocapi_price_unit(line.product_id, float(pline.price))
+            _logger.info(
+                f"[{order_name}] SKU {sku}: precio Producteca "
+                f"raw={pline.price} → convertido={converted} "
+                f"(account={account.name})"
+            )
+            return converted
+
+        except Exception as e:
+            _logger.error(
+                f"[{order_name}] SKU {sku}: error obteniendo precio Producteca "
+                f"→ fallback a price_unit={line.price_unit} | error: {e}"
+            )
+            return line.price_unit
+
     def _process_product_substitutions(self):
         """
         Procesa sustituciones de productos antes de confirmar la orden.
@@ -272,7 +324,7 @@ class SaleOrder(models.Model):
 
                 original_product = line.product_id
                 original_qty = line.product_uom_qty
-                original_price = line.price_unit
+                original_price = self._get_producteca_price_for_line(line)
                 original_sku = original_product.default_code or str(original_product.id)
 
                 _logger.info(f"--- Procesando: {original_sku} x {original_qty} @ {order_location.name} ---")
